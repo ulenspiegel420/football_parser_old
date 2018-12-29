@@ -1,7 +1,5 @@
 from chempionat_ru_parser import *
 from mysql_operations import Db
-import parsing_functions
-import bs4
 
 
 class Field:
@@ -141,135 +139,117 @@ class Database:
             values = list(map(lambda x: x, [v for f, v in node.data.items() if f != 'id']))
             node.data['id'] = self.sql_db.get_id(table.sql_select_id, tuple(values))
 
-def add_teams_to_db(team_nodes, db):
-    for node in team_nodes:
-        team_row = (node.name, node.city, node.parent.db_id)
-        if not db.team_exist(node.name, node.parent.db_id):
-            node.db_id = db.add_team(*team_row)
-        else:
-            db.passed_teams += 1
-            node.db_id = db.get_team_id(*team_row)
-
-
-def add_players_to_db(player_nodes, db):
-    for node in player_nodes:
-        player_row = (node.name,
-                      node.role,
-                      node.nationality,
-                      node.birth,
-                      node.growth,
-                      node.weight,
-                      node.parent.db_id)
-        if not db.player_exist(*player_row):
-            db.add_player(*player_row)
-        else:
-            db.passed_players += 1
-
-
-def add_matches_to_db(match_nodes, db):
-    for node in match_nodes:
-        if node.home == node.parent.name:
-            home_id = node.parent.db_id
-            team_row = (node.guest, node.parent.parent.db_id)
-            guest_id = db.get_team_id_by_name(*team_row)
-        else:
-            guest_id = node.parent.db_id
-            team_row = (node.home, node.parent.parent.db_id)
-            home_id = db.get_team_id_by_name(*team_row)
-        match_row = (node.tour,
-                     node.match_date,
-                     home_id,
-                     guest_id,
-                     node.home_result,
-                     node.guest_result,
-                     node.penalty_home,
-                     node.penalty_guest)
-        if not db.match_exist(*match_row):
-            db.add_play(*match_row)
-        else:
-            db.passed_matches += 1
-
-
-def parse_season(url):
-    try:
-        request = parsing_functions.get_request(url)
-        if request is None:
-            return
-
-        soup = bs4.BeautifulSoup(request.text, 'html.parser')
-        content = soup.find('div', 'js-tournament-header-year').find_all('option')
-        if content is None:
-            return
-        season_links = []
-        for item in content:
-            season_url = "https://www.championat.com" + item['data-href']
-            season = item.get_text().lstrip().rstrip().split("/")[0]
-            season_links.append({'url': season_url, 'season': season})
-        return season_links
-    except Exception as e:
-        print(e)
-        return
-
 
 def parsing(url):
-    site = "https://www.championat.com"
-    db_name_prefix = 'football_stats_'
+    db_name = 'football_stats'
+    database = Database(db_name)
+    # Creating schemas
+    year_fields = [
+        Field('id', 'int', ['pk', 'auto']),
+        Field('year', 'varchar(10)', ['unique', 'notnull']),
+        Field('url', 'varchar(100)', [])
+    ]
+    database.add_table(Table('seasons', Schema(year_fields)))
+
+    tournament_fields = [
+        Field('id', 'int', ['pk', 'auto']),
+        Field('year_id', 'int', ['fk', 'unique', 'notnull']),
+        Field('name', 'varchar(100)', ['unique', 'notnull']),
+        Field('country', 'varchar(50)', ['unique', 'notnull']),
+        Field('start_date', 'datetime', ['unique', 'notnull']),
+        Field('end_date', 'datetime', ['unique', 'notnull']),
+        Field('url', 'varchar(100)', [])
+    ]
+    year_fk = ForeignKey(tournament_fields[1], 'tournament_year_fk', 'seasons')
+    database.add_table(Table('tournaments', Schema(tournament_fields, [year_fk])))
+
+    team_fields = [
+        Field('id', 'int', ['pk', 'auto']),
+        Field('tournament_id', 'int', ['fk', 'unique', 'notnull']),
+        Field('name', 'varchar(100)', ['unique', 'notnull']),
+        Field('city', 'varchar(100)', ['unique', 'notnull'])
+    ]
+    tournament_fk = ForeignKey(team_fields[1], 'team_tournament_fk', 'tournaments')
+    database.add_table(Table('teams', Schema(team_fields, [tournament_fk])))
+
+    player_fields = [
+        Field('id', 'int', ['pk', 'auto']),
+        Field('team_id', 'int', ['fk', 'unique', 'notnull']),
+        Field('name', 'varchar(100)', ['unique', 'notnull']),
+        Field('nationality', 'varchar(50)', []),
+        Field('role', 'varchar(20)', []),
+        Field('birth', 'varchar(15)', ['unique']),
+        Field('growth', 'varchar(10)', []),
+        Field('weight', 'varchar(10)', [])
+    ]
+    team_fk = ForeignKey(player_fields[1], 'player_team_fk', 'teams')
+    database.add_table(Table('players', Schema(player_fields, [team_fk])))
+
+    match_fields = [
+        Field('id', 'int', ['pk', 'unique', 'auto']),
+        Field('home_team_id', 'int', ['fk', 'unique', 'notnull']),
+        Field('guest_team_id', 'int', ['fk', 'unique', 'notnull']),
+        Field('group_name', 'varchar(50)', []),
+        Field('tour', 'varchar(10)', ['notnull']),
+        Field('match_date', 'varchar(20)', ['notnull']),
+        Field('home_score', 'varchar(10)', []),
+        Field('guest_score', 'varchar(10)', []),
+        Field('home_penalty_score', 'varchar(10)', []),
+        Field('guest_penalty_score', 'varchar(10)', []),
+        Field('is_extra_time', 'boolean', []),
+    ]
+    home_team_fk = ForeignKey(match_fields[1], 'home_team_fk', 'teams')
+    guest_team_fk = ForeignKey(match_fields[2], 'guest_team_fk', 'teams')
+    database.add_table(Table('matches', Schema(match_fields, [home_team_fk, guest_team_fk])))
 
     try:
-        for season_link in parse_season(url):
-            print('***********************************************************************************************')
-            print('Parsing season: ', season_link['season'], '\n')
-
-            db_name = db_name_prefix + season_link['season']
-            database = Database(db_name)
-
-# Creating schema
-
-            tournament_fields = [
-                Field('id', 'int', ['pk', 'auto']),
-                Field('name', 'varchar(100)', ['unique', 'notnull']),
-                Field('country', 'varchar(50)', ['unique', 'notnull']),
-                Field('start_date', 'datetime', ['unique', 'notnull']),
-                Field('end_date', 'datetime', ['unique', 'notnull'])
-            ]
-            database.add_table(Table('tournaments', Schema(tournament_fields)))
-
-            team_fields = [
-                Field('id', 'int', ['pk', 'auto']),
-                Field('tournament_id', 'int', ['fk', 'unique', 'notnull']),
-                Field('name', 'varchar(100)', ['unique', 'notnull']),
-                Field('city', 'varchar(100)', ['unique', 'notnull'])
-            ]
-            tournament_fk = ForeignKey(team_fields[1], 'team_tournament_fk', 'tournaments')
-            database.add_table(Table('teams', Schema(team_fields, [tournament_fk])))
-
-
-
-# Parsing and adding data
-
+        seasons = ParsingTree.parse_seasons(url)
+        print('Parsed seasons: ', len(seasons))
+        database.add_rows_to_db(database.tables['seasons'], seasons)
+        # Parsing and adding data
+        for season in seasons:
+            database.sql_db.added_rows = 0
+            database.sql_db.missing_added_rows = []
+            print('**************************************************************************')
+            print('Parsing season: ', season.data['year'], '\n')
             tree = ParsingTree(url)
-
-            tree.parse_tournaments(season_link['url'])
+            tree.create_root()
+            start_parsing = datetime.now()
+            tree.parse_tournaments(season)
+            elapsed_time = datetime.now()-start_parsing
+            print('Parsed tournaments: ', tree.parsed_tournaments, ', for ', elapsed_time.total_seconds(), 'sec.')
             tournaments = tree.get_nodes_by_key(tree.ParsingTypes.tournament)
             database.add_rows_to_db(database.tables['tournaments'], tournaments)
 
+            start_parsing = datetime.now()
             tree.parse_teams(tournaments)
+            elapsed_time = datetime.now() - start_parsing
+            print('Parsed teams: ', tree.parsed_teams, ', for ', elapsed_time.total_seconds(), 'sec.')
             teams = tree.get_nodes_by_key(tree.ParsingTypes.team)
             database.add_rows_to_db(database.tables['teams'], teams)
 
-
-
+            start_parsing = datetime.now()
             tree.parse_players(teams)
+            elapsed_time = datetime.now() - start_parsing
+            print('Parsed players: ', tree.parsed_players, ' for ', elapsed_time.total_seconds(), 'sec.')
+            players = tree.get_nodes_by_key(tree.ParsingTypes.player)
+            if len(players) != 0:
+                database.add_rows_to_db(database.tables['players'], players)
 
-        #     print('Parsed tournaments: ', tree.parsed_tournaments, ' Added: ', db.added_tournaments,
-        #           ' Passed: ', db.passed_tournaments)
-        #     print('Parsed teams: ', tree.parsed_teams, ' Added: ', db.added_teams, ' Passed: ', db.passed_teams)
-        #     print('Parsed players: ', tree.parsed_players, ' Added: ', db.added_players, ' Passed: ', db.passed_players)
-        #     print('Parsed matches: ', tree.parsed_matches, ' Added: ', db.added_matches, ' Passed: ', db.passed_matches)
-        #
-        # with open("logs/missed_rows.log", 'w') as handle:
-        #     for row in db.missing_added_rows:
-        #         handle.write(row)
+            start_parsing = datetime.now()
+            tree.parse_matches(tournaments)
+            elapsed_time = datetime.now() - start_parsing
+            print('Parsed matches: ', tree.parsed_matches, ', for ', elapsed_time.total_seconds(), 'sec.')
+            matches = tree.get_nodes_by_key(tree.ParsingTypes.match)
+            database.add_rows_to_db(database.tables['matches'], matches)
+
+            print('Added rows: ', database.sql_db.added_rows)
+            print('Missed rows', len(database.sql_db.missing_added_rows))
+
+            if len(database.sql_db.missing_added_rows) != 0:
+                with open("logs/missed_rows.log", 'a') as handle:
+                    for row in database.sql_db.missing_added_rows:
+                        handle.write(','.join([str(field) for field in row['data']])+"\n")
 
     except Exception as e:
         print(e)
@@ -278,7 +258,7 @@ def parsing(url):
 
 if __name__ == '__main__':
     parsing("https://www.championat.com/stat/football/tournaments/2/domestic/")
-    exit = ''
+    exit_code = ''
     print('Введите [exit] для выхода')
-    while exit != 'exit':
-        exit = input()
+    while exit_code != 'exit':
+        exit_code = input()
