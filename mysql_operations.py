@@ -1,24 +1,16 @@
 from configparser import ConfigParser
 from mysql.connector import MySQLConnection, Error, errorcode
 import multiprocessing as mp
-from datetime import datetime
 from functools import reduce
 
 
 class Db:
-    class Connection(MySQLConnection):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-
-        def close(self):
-            super().close()
-
-    def __init__(self, path_to_mysql_config):
+    def __init__(self, path_to_mysql_config, db_name):
         self.path_to_mysql_config = path_to_mysql_config
         self.missing_added_rows = []
         self.sql_params = self._read_db_config()
         self.added_rows = 0
-        self.db_name = None
+        self.db_name = db_name
 
     def _add_to_missing(self, sql_error, row):
         self.missing_added_rows.append({str(sql_error.errno): sql_error.msg, 'data': row})
@@ -39,7 +31,7 @@ class Db:
     def _get_connection(self):
         """ Connect to MySQL database """
         try:
-            connection = MySQLConnection(**self._read_db_config())
+            connection = MySQLConnection(**self.sql_params)
             if connection.is_connected():
                 return connection
         except Error as e:
@@ -52,9 +44,9 @@ class Db:
 
     def create_db(self):
         query = 'CREATE DATABASE ' + self.db_name
-        connection, result = None, None
+        connection, cursor, result = None, None, None
         try:
-            connection = self.Connection(**self.sql_params)
+            connection = self._get_connection()
             cursor = connection.cursor()
             cursor.execute(query)
         except Error as e:
@@ -63,12 +55,13 @@ class Db:
             print('Ошибка создания базы данных ', self.db_name)
             print(e)
         finally:
+            cursor.close()
             connection.close()
 
     def create_table(self, sql):
-        connection, result = None, None
+        connection, cursor, result = None, None, None
         try:
-            connection = self.Connection(**self.sql_params)
+            connection = self._get_connection()
             connection.database = self.db_name
             cursor = connection.cursor()
             cursor.execute(sql)
@@ -78,13 +71,15 @@ class Db:
             print('Ошибка создания таблицы ', sql)
             print(e)
         finally:
+            cursor.close()
             connection.close()
 
     def _insert_row(self, rows, sql):
-        connection = self.Connection(**self.sql_params)
-        connection.database = self.db_name
+        connection, cursor, result = None, None, None
         success_rows = 0
         missed_rows = []
+        connection = self._get_connection()
+        connection.database = self.db_name
         cursor = connection.cursor(buffered=True)
         for row in rows:
             try:
@@ -98,13 +93,10 @@ class Db:
         connection.close()
         return {'added_count': success_rows, 'missed_rows': missed_rows}
 
-    def insert_multiproc_rows(self, sql: str, rows: list):
+    def insert_rows_async(self, sql: str, rows: list):
         pool = mp.Pool(processes=4)
-        added = 0
-        missed = []
-        results = []
+
         sub_rows = []
-        start = datetime.now()
         n = 100
         if len(rows) >= n:
             while len(rows) != 0:
@@ -121,39 +113,29 @@ class Db:
             results = [pool.apply_async(self._insert_row, args=(sub_rows, sql))]
             pool.close()
             pool.join()
-        added = reduce((lambda x, y: x+y), [result.get()['added_count'] for result in results])
-        [missed.extend(result.get()['missed_rows']) for result in results]
-        self.added_rows += added
-        self.missing_added_rows.extend(missed)
-        elapsed = datetime.now() - start
-        print(f"Inserted {added} rows to db for {elapsed.total_seconds()}sec. Missed {len(missed)}\n")
+
+        self.added_rows += reduce((lambda x, y: x+y), [result.get()['added_count'] for result in results])
+        ([self.missing_added_rows.extend(result.get()['missed_rows']) for result in results])
 
     def insert_rows(self, sql: str, rows: list):
-        added = 0
-        missed = []
-        connection = self.Connection(**self.sql_params)
+        connection = self._get_connection()
         connection.database = self.db_name
         cursor = connection.cursor(buffered=True)
-        start = datetime.now()
         for row in rows:
             try:
                 cursor.execute(sql, row)
                 connection.commit()
-                added += 1
+                self.added_rows += 1
             except Error as e:
-                missed.append({'error': e.errno, 'data': row})
+                self.missing_added_rows.append({'error': e.errno, 'data': row})
                 continue
         cursor.close()
         connection.close()
-        elapsed = datetime.now() - start
-        self.added_rows += added
-        self.missing_added_rows.extend(missed)
-        print(f"Inserted {added} rows to db for {elapsed.total_seconds()}sec. Missed {len(missed)}\n")
 
     def get_id(self, sql, field):
-        connection, result = None, None
+        connection, cursor, result = None, None, None
         try:
-            connection = self.Connection(**self.sql_params)
+            connection = self._get_connection()
             connection.database = self.db_name
             cursor = connection.cursor()
             cursor.execute(sql, field)
@@ -164,5 +146,6 @@ class Db:
             print('Ошибка получения ид.')
             print(e)
         finally:
+            cursor.close()
             connection.close()
             return result[0] if result else result
