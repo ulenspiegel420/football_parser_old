@@ -17,10 +17,10 @@ def get_rand_user_agent_from_file(filename):
 
 
 def logging_error(error: str):
-    with open("logs/errors.log", 'a') as handle:
+    with open("logs/error.log", 'a') as handle:
             handle.write(datetime.now().strftime("%d.%m.%y|%H:%M:%S")+' '+error+'\n')
 
 
 def logging_warning(msg: str):
-    with open("logs/warnings.log", 'a') as handle:
+    with open("logs/warning.log", 'a') as handle:
             handle.write(datetime.now().strftime("%d.%m.%y|%H:%M:%S")+' '+msg+'\n')

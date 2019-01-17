@@ -13,7 +13,7 @@ class Db:
         self.db_name = db_name
 
     def _add_to_missing(self, sql_error, row):
-        self.missing_added_rows.append({str(sql_error.errno): sql_error.msg, 'data': row})
+        self.missing_added_rows.append({'error': str(sql_error.msg), 'data': row})
 
     def _read_db_config(self, section='mysql'):
         """ Read database configuration file and return a dictionary object"""
@@ -97,7 +97,7 @@ class Db:
         pool = mp.Pool(processes=4)
 
         sub_rows = []
-        n = 100
+        n = 5000
         if len(rows) >= n:
             while len(rows) != 0:
                 if len(rows) >= n:

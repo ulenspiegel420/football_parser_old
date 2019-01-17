@@ -1,5 +1,5 @@
 from mysql_operations import Db
-from chempionat_ru_parser import ParsingTree
+from chempionat_ru_parser import ParsingTypes
 
 
 class Field:
@@ -114,30 +114,31 @@ class Database:
         self.sql_db = Db("config/mysql_cfg.ini", db_name)
         self.tables: dict = {}
 
-        season_fields = [
-            Field('id', 'int', ['pk', 'auto']),
-            Field('year', 'varchar(10)', ['unique', 'notnull']),
-            Field('url', 'varchar(100)', [])
-        ]
-        self.__add_table(Table('seasons', Schema(season_fields)))
+        # season_fields = [
+        #     Field('id', 'int', ['pk', 'auto']),
+        #     Field('year', 'varchar(10)', ['unique', 'notnull']),
+        #     Field('url', 'varchar(100)', [])
+        # ]
+        # self.__add_table(Table('seasons', Schema(season_fields)))
 
         tournament_fields = [
             Field('id', 'int', ['pk', 'auto']),
-            Field('year_id', 'int', ['fk', 'unique', 'notnull']),
+            # Field('year_id', 'int', ['fk', 'unique', 'notnull']),
             Field('name', 'varchar(100)', ['unique', 'notnull']),
             Field('country', 'varchar(50)', ['unique', 'notnull']),
             Field('start_date', 'datetime', ['unique', 'notnull']),
             Field('end_date', 'datetime', ['unique', 'notnull']),
-            Field('url', 'varchar(100)', [])
+            Field('url', 'varchar(150)', [])
         ]
-        season_fk = ForeignKey(tournament_fields[1], 'tournament_year_fk', 'seasons')
-        self.__add_table(Table('tournaments', Schema(tournament_fields, [season_fk])))
+        # season_fk = ForeignKey(tournament_fields[1], 'tournament_year_fk', 'seasons')
+        self.__add_table(Table('tournaments', Schema(tournament_fields, [])))
 
         team_fields = [
             Field('id', 'int', ['pk', 'auto']),
             Field('tournament_id', 'int', ['fk', 'unique', 'notnull']),
             Field('name', 'varchar(100)', ['unique', 'notnull']),
-            Field('city', 'varchar(100)', ['unique', 'notnull'])
+            Field('city', 'varchar(100)', ['unique', 'notnull']),
+            Field('url', 'varchar(150)', [])
         ]
         tournament_fk = ForeignKey(team_fields[1], 'team_tournament_fk', 'tournaments')
         self.__add_table(Table('teams', Schema(team_fields, [tournament_fk])))
@@ -156,12 +157,12 @@ class Database:
         self.__add_table(Table('players', Schema(player_fields, [team_fk])))
 
         match_fields = [
-            Field('id', 'int', ['pk', 'unique', 'auto']),
+            Field('id', 'int', ['pk', 'auto']),
             Field('home_team_id', 'int', ['fk', 'unique', 'notnull']),
             Field('guest_team_id', 'int', ['fk', 'unique', 'notnull']),
             Field('group_name', 'varchar(50)', []),
-            Field('tour', 'varchar(10)', ['notnull']),
-            Field('match_date', 'varchar(20)', ['notnull']),
+            Field('tour', 'varchar(10)', []),
+            Field('match_date', 'varchar(20)', ['unique', 'notnull']),
             Field('home_score', 'varchar(10)', []),
             Field('guest_score', 'varchar(10)', []),
             Field('home_penalty_score', 'varchar(10)', []),
@@ -188,12 +189,9 @@ class Database:
             values = list(map(lambda x: x, [v for f, v in node.data.items() if f != 'id']))
             id = self.sql_db.get_id(table.sql_select_id, tuple(values))
             node.data['id'] = id
-            if node.key == ParsingTree.ParsingTypes.tournament:
+            if node.key == ParsingTypes.tournament:
                 for child in node.get_children():
                     child.data['tournament_id'] = id
-            elif node.key == ParsingTree.ParsingTypes.season:
-                for child in node.get_children():
-                    child.data['season_id'] = id
-            elif node.key == ParsingTree.ParsingTypes.team:
+            elif node.key == ParsingTypes.team:
                 for child in node.get_children():
                     child.data['team_id'] = id
